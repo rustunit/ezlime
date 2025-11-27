@@ -1,0 +1,4 @@
+/target
+.env
+migrations/.diesel_lock
+.DS_Store

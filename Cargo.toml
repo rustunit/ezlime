@@ -1,0 +1,40 @@
+[package]
+name = "ezlime"
+version = "0.1.0"
+edition = "2024"
+authors = ["extrawurst <mail@rusticorn.com>"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+axum = { version = "0.8.7", features = ["macros"] }
+axum-turnstile = "0.1"
+base62 = "2.2.3"
+chrono = "0.4.42"
+clap = { version = "4.5.52", features = ["derive", "env"] }
+deadpool = "0.12.3"
+diesel = { version = "2.3.0", features = ["postgres", "chrono"] }
+diesel-async = { version = "0.7", features = ["postgres", "deadpool"] }
+diesel_migrations = { version = "2.3.0", features = ["postgres"] }
+ezlime-rs = { path = "./ezlime-rs" }
+futures-util = "0.3.31"
+quick_cache = "0.6.18"
+reqwest = { version = "0.12.24", features = ["json"] }
+rustls = "0.23.35"
+rustls-platform-verifier = "0.6.2"
+serde = "1.0.228"
+serde_json = "1.0.145"
+thiserror = "2.0.17"
+tokio = { version = "1.48.0", features = ["full"] }
+tokio-postgres = "0.7.15"
+tokio-postgres-rustls = "0.13.0"
+tower = "0.5.2"
+tower-http = { version = "0.6.6", features = ["full"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+
+[dev-dependencies]
+mockall = "0.13.1"
+testcontainers = "0.25"
+testcontainers-modules = { version = "0.13", features = ["postgres"] }

@@ -1,0 +1,74 @@
+name: cd
+
+on:
+  push:
+    branches: ["*"]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/rustunit/ezlime/server
+  K8S_NS: weeme
+
+jobs:
+  deploy_server:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: leafwing-studios/cargo-cache@v2
+        with:
+          sweep-cache: true
+
+      - name: Install pq
+        run: sudo apt-get update; sudo apt-get install -y --no-install-recommends libpq-dev
+
+      - name: Test
+        run: cargo t
+
+      - name: Lint
+        run: cargo clippy
+
+      - name: Build
+        run: |
+          cargo build --release
+          mkdir linux_bin
+          cp target/release/ezlime linux_bin/server
+          ls -lisah linux_bin/server
+
+      - name: Docker build
+        run: |
+          docker build -t ${{ env.IMAGE_NAME }}:latest .
+          docker tag ${{ env.IMAGE_NAME }}:latest ${{ env.IMAGE_NAME }}:${GITHUB_SHA:0:7}
+
+      - name: Docker Push
+        run: |
+          docker push ${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.IMAGE_NAME }}:${GITHUB_SHA:0:7}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Update deployment
+        run: |
+          export IMG_NAME=${{ env.IMAGE_NAME }}
+          kubectl -n ${{ env.K8S_NS }} patch deployment server \
+            --patch '{"spec":{"template":{"spec":{"containers":[{"name":"server","image":"'${IMG_NAME}':'${GITHUB_SHA:0:7}'"}]}}}}'
