@@ -2,7 +2,7 @@ name: cd
 
 on:
   push:
-    branches: ["*"]
+    branches: ["main"]
 
 env:
   REGISTRY: ghcr.io
