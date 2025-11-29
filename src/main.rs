@@ -4,8 +4,12 @@ use crate::{
     counter::{ClickCounter, start_counter_flusher},
     db::PostgresDb,
     db_pool::DbPool,
-    handler::{handle_create, handle_health, handle_public_create, handle_redirect},
+    handler::{
+        X402Config, handle_create, handle_health, handle_public_create, handle_redirect,
+        handle_x402_create,
+    },
     migrations::run_migrations,
+    x402::FacilitatorClient,
 };
 use axum::{
     Router, middleware,
@@ -28,6 +32,7 @@ mod migrations;
 mod models;
 mod schema;
 mod signals;
+mod x402;
 
 #[cfg(not(debug_assertions))]
 #[must_use]
@@ -86,6 +91,21 @@ struct Arguments {
 
     #[arg(long, default_value_t = String::from("1x0000000000000000000000000000000AA"), env = "TURNSTILE_SECRET")]
     turnstile_secret: String,
+
+    #[arg(long, default_value_t = String::from("https://facilitator.x402.dev"), env = "X402_FACILITATOR_URL")]
+    x402_facilitator_url: String,
+
+    #[arg(long, default_value_t = String::from("base-sepolia"), env = "X402_NETWORK")]
+    x402_network: String,
+
+    #[arg(long, default_value_t = String::from("0.005"), env = "X402_PRICE_PER_LINK")]
+    x402_price_per_link: String,
+
+    #[arg(long, default_value_t = String::from("0x036CbD53842c5426634e7929541eC2318f3dCF7e"), env = "X402_ASSET_ADDRESS")]
+    x402_asset_address: String,
+
+    #[arg(long, env = "X402_MERCHANT_WALLET")]
+    x402_merchant_wallet: Option<String>,
 }
 
 fn setup_cors(relaxed: bool) -> CorsLayer {
@@ -141,6 +161,37 @@ async fn main() -> anyhow::Result<()> {
         .route("/shorten", post(handle_public_create))
         .layer(TurnstileLayer::from_secret(args.turnstile_secret));
 
+    // x402 payment endpoint (optional - only if merchant wallet is configured)
+    let x402_router = if let Some(merchant_wallet) = args.x402_merchant_wallet {
+        tracing::info!(
+            facilitator = %args.x402_facilitator_url,
+            network = %args.x402_network,
+            price = %args.x402_price_per_link,
+            merchant = %merchant_wallet,
+            "x402 payment endpoint enabled"
+        );
+
+        let facilitator = Arc::new(
+            FacilitatorClient::new(args.x402_facilitator_url)
+                .expect("Failed to create facilitator client"),
+        );
+
+        let x402_config = Arc::new(X402Config {
+            network: args.x402_network,
+            price_per_link: args.x402_price_per_link,
+            asset_address: args.x402_asset_address,
+            merchant_wallet,
+        });
+
+        Router::new()
+            .route("/x402/shorten", post(handle_x402_create))
+            .layer(axum::Extension(facilitator))
+            .layer(axum::Extension(x402_config))
+    } else {
+        tracing::info!("x402 payment endpoint disabled (no merchant wallet configured)");
+        Router::new()
+    };
+
     let router = Router::new()
         //authenticated routes
         .route("/link/create", post(handle_create))
@@ -148,6 +199,7 @@ async fn main() -> anyhow::Result<()> {
         //public routes
         .route("/{id}", get(handle_redirect))
         .merge(pub_api)
+        .merge(x402_router)
         .route("/health", get(handle_health))
         .layer(TraceLayer::new_for_http())
         .layer(setup_cors(cors_relaxed))
