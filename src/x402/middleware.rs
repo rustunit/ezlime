@@ -13,7 +13,6 @@ pub fn parse_payment_header(header_value: &str) -> Result<PaymentPayload, Paymen
     let payment: PaymentPayload = serde_json::from_slice(&decoded).map_err(|e| {
         warn!(
             error = %e,
-            raw_json = %String::from_utf8_lossy(&decoded),
             "Failed to parse payment payload"
         );
         PaymentParseError::InvalidJson

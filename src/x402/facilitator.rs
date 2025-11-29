@@ -39,18 +39,11 @@ impl FacilitatorClient {
             payment_requirements: requirements.clone(),
         };
 
-        let request_json = serde_json::to_string_pretty(&request_body).unwrap_or_default();
         info!(
-            url = %url,
-            scheme = %payment.scheme,
-            network = %payment.network,
             from = %payment.payload.authorization.from,
             to = %payment.payload.authorization.to,
             value = %payment.payload.authorization.value,
-            signature = %payment.payload.signature,
-            nonce = %payment.payload.authorization.nonce,
-            request_body = %request_json,
-            "Sending verify request to facilitator"
+            "Verifying payment with facilitator"
         );
 
         let response = self
@@ -84,14 +77,12 @@ impl FacilitatorClient {
             .await
             .context("Failed to parse verify response")?;
 
-        info!(
-            is_valid = verify_response.is_valid,
-            payer = ?verify_response.payer,
-            invalid_reason = ?verify_response.invalid_reason,
-            "Verify response received"
-        );
-
         if !verify_response.is_valid {
+            warn!(
+                payer = ?verify_response.payer,
+                reason = ?verify_response.invalid_reason,
+                "Payment verification failed"
+            );
             anyhow::bail!(
                 "Payment verification failed: {}",
                 verify_response
@@ -99,6 +90,11 @@ impl FacilitatorClient {
                     .unwrap_or_else(|| "Unknown reason".to_string())
             );
         }
+
+        info!(
+            payer = ?verify_response.payer,
+            "Payment verified successfully"
+        );
 
         Ok(verify_response)
     }
@@ -118,11 +114,10 @@ impl FacilitatorClient {
         };
 
         info!(
-            url = %url,
             from = %payment.payload.authorization.from,
             to = %payment.payload.authorization.to,
             value = %payment.payload.authorization.value,
-            "Sending settle request to facilitator"
+            "Settling payment with facilitator"
         );
 
         let response = self
@@ -157,10 +152,9 @@ impl FacilitatorClient {
             .context("Failed to parse settle response")?;
 
         info!(
-            success = settle_response.success,
             tx_hash = %settle_response.transaction,
             payer = %settle_response.payer,
-            "Payment settled"
+            "Payment settled successfully"
         );
 
         if !settle_response.success {

@@ -101,7 +101,7 @@ pub async fn handle_x402_create(
         }
         None => {
             // No payment provided, return 402 with payment requirements
-            info!(url = %create.url, "x402: payment required");
+            info!(url = %create.url, "Payment required");
 
             let payment_required = PaymentRequiredResponse {
                 x402_version: 1,
@@ -124,10 +124,8 @@ pub async fn handle_x402_create(
     info!(
         url = %create.url,
         from = %payment_payload.payload.authorization.from,
-        to = %payment_payload.payload.authorization.to,
         value = %payment_payload.payload.authorization.value,
-        network = %payment_payload.network,
-        "x402: processing payment"
+        "Processing x402 payment"
     );
 
     // Build payment requirements for facilitator
@@ -152,7 +150,7 @@ pub async fn handle_x402_create(
             info!(
                 tx_hash = %settlement.transaction,
                 payer = %settlement.payer,
-                "x402: payment settled successfully"
+                "Payment settled, creating link"
             );
 
             // Payment successful, create the link
@@ -164,7 +162,7 @@ pub async fn handle_x402_create(
             error!(
                 error = %e,
                 from = %payment_payload.payload.authorization.from,
-                "x402: payment settlement failed"
+                "Payment settlement failed"
             );
 
             // Return 402 again so client can retry
