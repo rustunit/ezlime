@@ -39,6 +39,7 @@ impl FacilitatorClient {
             payment_requirements: requirements.clone(),
         };
 
+        let request_json = serde_json::to_string_pretty(&request_body).unwrap_or_default();
         info!(
             url = %url,
             scheme = %payment.scheme,
@@ -46,6 +47,9 @@ impl FacilitatorClient {
             from = %payment.payload.authorization.from,
             to = %payment.payload.authorization.to,
             value = %payment.payload.authorization.value,
+            signature = %payment.payload.signature,
+            nonce = %payment.payload.authorization.nonce,
+            request_body = %request_json,
             "Sending verify request to facilitator"
         );
 

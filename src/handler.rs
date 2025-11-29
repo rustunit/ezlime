@@ -137,6 +137,7 @@ pub async fn handle_x402_create(
         max_amount_required: x402_config.price_per_link.clone(),
         pay_to: x402_config.merchant_wallet.clone(),
         asset: x402_config.asset_address.clone(),
+        mime_type: "application/json".to_string(),
         resource: Some(format!("{}/x402/shorten", create.url)),
         description: Some("Link shortening service".to_string()),
         max_timeout_seconds: Some(60),

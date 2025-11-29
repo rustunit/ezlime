@@ -88,6 +88,7 @@ pub struct FacilitatorPaymentRequirement {
     pub max_amount_required: String,
     pub pay_to: String,
     pub asset: String,
+    pub mime_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -98,7 +98,7 @@ struct Arguments {
     #[arg(long, default_value_t = String::from("base-sepolia"), env = "X402_NETWORK")]
     x402_network: String,
 
-    #[arg(long, default_value_t = String::from("0.005"), env = "X402_PRICE_PER_LINK")]
+    #[arg(long, default_value_t = String::from("5000"), env = "X402_PRICE_PER_LINK")]
     x402_price_per_link: String,
 
     #[arg(long, default_value_t = String::from("0x036CbD53842c5426634e7929541eC2318f3dCF7e"), env = "X402_ASSET_ADDRESS")]
