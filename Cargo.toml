@@ -11,7 +11,6 @@ async-trait = "0.1"
 axum = { version = "0.8.7", features = ["macros"] }
 axum-turnstile = "0.1"
 base62 = "2.2.3"
-base64 = "0.22"
 chrono = "0.4.42"
 clap = { version = "4.5.52", features = ["derive", "env"] }
 deadpool = "0.12.3"
@@ -34,6 +33,8 @@ tower = "0.5.2"
 tower-http = { version = "0.6.6", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+x402-axum = "0.6"
+x402-rs = "0.9.3"
 
 [dev-dependencies]
 mockall = "0.13.1"

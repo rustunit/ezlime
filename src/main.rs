@@ -5,11 +5,9 @@ use crate::{
     db::PostgresDb,
     db_pool::DbPool,
     handler::{
-        X402Config, handle_create, handle_health, handle_public_create, handle_redirect,
-        handle_x402_create,
+        handle_create, handle_health, handle_public_create, handle_redirect, handle_x402_create,
     },
     migrations::run_migrations,
-    x402::FacilitatorClient,
 };
 use axum::{
     Router, middleware,
@@ -21,6 +19,9 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use x402_axum::{PriceTag, X402Middleware};
+use x402_rs::network::{Network, USDCDeployment};
+use x402_rs::types::EvmAddress;
 
 mod app;
 mod auth;
@@ -32,7 +33,6 @@ mod migrations;
 mod models;
 mod schema;
 mod signals;
-mod x402;
 
 #[cfg(not(debug_assertions))]
 #[must_use]
@@ -95,14 +95,8 @@ struct Arguments {
     #[arg(long, default_value_t = String::from("https://x402.org/facilitator"), env = "X402_FACILITATOR_URL")]
     x402_facilitator_url: String,
 
-    #[arg(long, default_value_t = String::from("base-sepolia"), env = "X402_NETWORK")]
-    x402_network: String,
-
-    #[arg(long, default_value_t = String::from("5000"), env = "X402_PRICE_PER_LINK")]
+    #[arg(long, default_value_t = String::from("0.005"), env = "X402_PRICE_PER_LINK")]
     x402_price_per_link: String,
-
-    #[arg(long, default_value_t = String::from("0x036CbD53842c5426634e7929541eC2318f3dCF7e"), env = "X402_ASSET_ADDRESS")]
-    x402_asset_address: String,
 
     #[arg(long, env = "X402_MERCHANT_WALLET")]
     x402_merchant_wallet: Option<String>,
@@ -165,28 +159,39 @@ async fn main() -> anyhow::Result<()> {
     let x402_router = if let Some(merchant_wallet) = args.x402_merchant_wallet {
         tracing::info!(
             facilitator = %args.x402_facilitator_url,
-            network = %args.x402_network,
             price = %args.x402_price_per_link,
             merchant = %merchant_wallet,
             "x402 payment endpoint enabled"
         );
 
-        let facilitator = Arc::new(
-            FacilitatorClient::new(args.x402_facilitator_url)
-                .expect("Failed to create facilitator client"),
-        );
+        // Create x402 middleware
+        let x402 = X402Middleware::try_from(args.x402_facilitator_url.as_str())
+            .expect("Failed to create x402 middleware");
 
-        let x402_config = Arc::new(X402Config {
-            network: args.x402_network,
-            price_per_link: args.x402_price_per_link,
-            asset_address: args.x402_asset_address,
-            merchant_wallet,
-        });
+        // Parse merchant wallet address
+        let merchant_address: EvmAddress = merchant_wallet
+            .parse()
+            .expect("Invalid merchant wallet address");
+
+        // Parse price as float, then convert to token units (USDC has 6 decimals)
+        let price_usdc: f64 = args
+            .x402_price_per_link
+            .parse()
+            .expect("Invalid price format");
+
+        // Convert to base units (multiply by 10^6 for USDC)
+        let price_base_units = (price_usdc * 1_000_000.0) as u64;
+
+        // Create price tag for Base Sepolia USDC
+        let usdc_deployment = USDCDeployment::by_network(Network::BaseSepolia);
+        let price_tag = PriceTag::new(merchant_address, price_base_units, usdc_deployment);
 
         Router::new()
             .route("/x402/shorten", post(handle_x402_create))
-            .layer(axum::Extension(facilitator))
-            .layer(axum::Extension(x402_config))
+            .layer(
+                x402.with_description("Link shortening service")
+                    .with_price_tag(price_tag),
+            )
     } else {
         tracing::info!("x402 payment endpoint disabled (no merchant wallet configured)");
         Router::new()

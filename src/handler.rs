@@ -1,21 +1,14 @@
-use crate::{
-    app::App,
-    auth::AuthenticatedKey,
-    x402::{
-        FacilitatorClient, FacilitatorPaymentRequirement, PaymentRequiredResponse,
-        PaymentRequirement, parse_payment_header,
-    },
-};
+use crate::{app::App, auth::AuthenticatedKey};
 use axum::{
     Extension, Json,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{Html, IntoResponse, Redirect, Response},
 };
 use axum_turnstile::VerifiedTurnstile;
 use ezlime_rs::CreateLinkRequest;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 
 // Make our own error that wraps `anyhow::Error`.
 pub struct AppError(anyhow::Error);
@@ -78,118 +71,16 @@ pub async fn handle_public_create(
 }
 
 /// x402-powered link shortening endpoint
-/// Requires payment via X-PAYMENT header
+/// Payment enforcement is handled by x402-axum middleware
 pub async fn handle_x402_create(
     State(app): State<Arc<App>>,
-    Extension(facilitator): Extension<Arc<FacilitatorClient>>,
-    Extension(x402_config): Extension<Arc<X402Config>>,
-    headers: HeaderMap,
     Json(create): Json<CreateLinkRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Check if payment header was provided
-    let payment_header = headers.get("X-PAYMENT");
+    info!(url = %create.url, "Creating link (x402 payment verified by middleware)");
 
-    let payment_payload = match payment_header {
-        Some(header_value) => {
-            // Parse the payment header
-            let header_str = header_value
-                .to_str()
-                .map_err(|_| anyhow::anyhow!("Invalid X-PAYMENT header format"))?;
+    // Payment is already verified by x402-axum middleware
+    // If we reached here, payment was successful
+    let response = app.create_link("x402".to_string(), create).await?;
 
-            parse_payment_header(header_str)
-                .map_err(|_| anyhow::anyhow!("Failed to parse payment payload"))?
-        }
-        None => {
-            // No payment provided, return 402 with payment requirements
-            info!(url = %create.url, "Payment required");
-
-            let payment_required = PaymentRequiredResponse {
-                x402_version: 1,
-                accepts: vec![PaymentRequirement {
-                    scheme: "exact".to_string(),
-                    network: x402_config.network.clone(),
-                    max_amount_required: x402_config.price_per_link.clone(),
-                    asset: x402_config.asset_address.clone(),
-                    pay_to: x402_config.merchant_wallet.clone(),
-                    resource: Some("/x402/shorten".to_string()),
-                    description: Some("Link shortening service".to_string()),
-                    max_timeout_seconds: Some(60),
-                }],
-            };
-
-            return Ok((StatusCode::PAYMENT_REQUIRED, Json(payment_required)).into_response());
-        }
-    };
-
-    info!(
-        url = %create.url,
-        from = %payment_payload.payload.authorization.from,
-        value = %payment_payload.payload.authorization.value,
-        "Processing x402 payment"
-    );
-
-    // Build payment requirements for facilitator
-    let payment_requirements = FacilitatorPaymentRequirement {
-        scheme: "exact".to_string(),
-        network: x402_config.network.clone(),
-        max_amount_required: x402_config.price_per_link.clone(),
-        pay_to: x402_config.merchant_wallet.clone(),
-        asset: x402_config.asset_address.clone(),
-        mime_type: "application/json".to_string(),
-        resource: Some(format!("{}/x402/shorten", create.url)),
-        description: Some("Link shortening service".to_string()),
-        max_timeout_seconds: Some(60),
-    };
-
-    // Verify and settle the payment
-    match facilitator
-        .verify_and_settle(&payment_payload, &payment_requirements)
-        .await
-    {
-        Ok(settlement) => {
-            info!(
-                tx_hash = %settlement.transaction,
-                payer = %settlement.payer,
-                "Payment settled, creating link"
-            );
-
-            // Payment successful, create the link
-            let response = app.create_link("x402".to_string(), create).await?;
-
-            Ok(Json(response).into_response())
-        }
-        Err(e) => {
-            error!(
-                error = %e,
-                from = %payment_payload.payload.authorization.from,
-                "Payment settlement failed"
-            );
-
-            // Return 402 again so client can retry
-            let payment_required = PaymentRequiredResponse {
-                x402_version: 1,
-                accepts: vec![PaymentRequirement {
-                    scheme: "exact".to_string(),
-                    network: x402_config.network.clone(),
-                    max_amount_required: x402_config.price_per_link.clone(),
-                    asset: x402_config.asset_address.clone(),
-                    pay_to: x402_config.merchant_wallet.clone(),
-                    resource: Some("/x402/shorten".to_string()),
-                    description: Some("Link shortening service".to_string()),
-                    max_timeout_seconds: Some(60),
-                }],
-            };
-
-            Ok((StatusCode::PAYMENT_REQUIRED, Json(payment_required)).into_response())
-        }
-    }
-}
-
-/// Configuration for x402 payment endpoint
-#[derive(Debug, Clone)]
-pub struct X402Config {
-    pub network: String,
-    pub price_per_link: String,
-    pub asset_address: String,
-    pub merchant_wallet: String,
+    Ok(Json(response).into_response())
 }
