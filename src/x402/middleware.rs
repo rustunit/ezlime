@@ -11,7 +11,11 @@ pub fn parse_payment_header(header_value: &str) -> Result<PaymentPayload, Paymen
 
     // Parse JSON
     let payment: PaymentPayload = serde_json::from_slice(&decoded).map_err(|e| {
-        warn!(error = %e, "Failed to parse payment payload");
+        warn!(
+            error = %e,
+            raw_json = %String::from_utf8_lossy(&decoded),
+            "Failed to parse payment payload"
+        );
         PaymentParseError::InvalidJson
     })?;
 
@@ -19,9 +23,11 @@ pub fn parse_payment_header(header_value: &str) -> Result<PaymentPayload, Paymen
 }
 
 /// Error type for payment parsing
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PaymentParseError {
+    #[error("Invalid base64 encoding in payment header")]
     InvalidBase64,
+    #[error("Invalid JSON in payment payload")]
     InvalidJson,
 }
 
@@ -31,10 +37,23 @@ mod tests {
 
     #[test]
     fn test_parse_payment() {
+        use super::super::types::{PaymentPayloadData, TransferAuthorization};
+
         let payment = PaymentPayload {
-            transaction_hash: "0xabc123".to_string(),
+            x402_version: 1,
+            scheme: "exact".to_string(),
             network: "base-sepolia".to_string(),
-            payment_requirement: None,
+            payload: PaymentPayloadData {
+                signature: "0xsig123".to_string(),
+                authorization: TransferAuthorization {
+                    from: "0x1234".to_string(),
+                    to: "0x5678".to_string(),
+                    value: "5000".to_string(),
+                    valid_after: "0".to_string(),
+                    valid_before: "999999999999".to_string(),
+                    nonce: "0xnonce".to_string(),
+                },
+            },
         };
 
         // Encode manually for testing
@@ -43,7 +62,9 @@ mod tests {
 
         // Parse it back
         let parsed = parse_payment_header(&encoded).unwrap();
-        assert_eq!(parsed.transaction_hash, "0xabc123");
+        assert_eq!(parsed.x402_version, 1);
+        assert_eq!(parsed.scheme, "exact");
         assert_eq!(parsed.network, "base-sepolia");
+        assert_eq!(parsed.payload.authorization.value, "5000");
     }
 }

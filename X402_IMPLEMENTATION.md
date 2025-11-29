@@ -64,7 +64,7 @@ Add to your `.env` file:
 export X402_MERCHANT_WALLET="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"
 
 # Optional: Override defaults
-export X402_FACILITATOR_URL="https://facilitator.x402.dev"
+export X402_FACILITATOR_URL="https://x402.org/facilitator"
 export X402_NETWORK="base-sepolia"
 export X402_PRICE_PER_LINK="0.005"
 export X402_ASSET_ADDRESS="0x036CbD53842c5426634e7929541eC2318f3dCF7e"

@@ -1,9 +1,11 @@
-use super::types::{PaymentPayload, SettleResponse, VerifyResponse};
+use super::types::{
+    FacilitatorPaymentRequirement, FacilitatorRequest, PaymentPayload, SettleResponse,
+    VerifyResponse,
+};
 use anyhow::{Context, Result};
 use reqwest::Client;
-use serde_json::json;
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{error, info, warn};
 
 /// Client for interacting with x402 facilitator service
 #[derive(Clone, Debug)]
@@ -25,25 +27,42 @@ impl FacilitatorClient {
 
     /// Verify a payment without settling it
     /// Returns Ok(true) if payment is valid
-    pub async fn verify(&self, payment: &PaymentPayload) -> Result<bool> {
+    pub async fn verify(
+        &self,
+        payment: &PaymentPayload,
+        requirements: &FacilitatorPaymentRequirement,
+    ) -> Result<VerifyResponse> {
         let url = format!("{}/verify", self.base_url);
 
-        debug!(
-            tx_hash = %payment.transaction_hash,
+        let request_body = FacilitatorRequest {
+            payment_payload: payment.clone(),
+            payment_requirements: requirements.clone(),
+        };
+
+        info!(
+            url = %url,
+            scheme = %payment.scheme,
             network = %payment.network,
-            "Verifying payment"
+            from = %payment.payload.authorization.from,
+            to = %payment.payload.authorization.to,
+            value = %payment.payload.authorization.value,
+            "Sending verify request to facilitator"
         );
 
         let response = self
             .client
             .post(&url)
-            .json(&json!({
-                "transactionHash": payment.transaction_hash,
-                "network": payment.network,
-            }))
+            .json(&request_body)
             .send()
             .await
-            .context("Failed to send verify request")?;
+            .map_err(|e| {
+                error!(
+                    error = %e,
+                    url = %url,
+                    "HTTP request to facilitator failed"
+                );
+                anyhow::anyhow!("Failed to send verify request: {}", e)
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -53,7 +72,7 @@ impl FacilitatorClient {
                 body = %body,
                 "Facilitator verify request failed"
             );
-            return Ok(false);
+            anyhow::bail!("Facilitator returned {}: {}", status, body);
         }
 
         let verify_response: VerifyResponse = response
@@ -61,45 +80,71 @@ impl FacilitatorClient {
             .await
             .context("Failed to parse verify response")?;
 
-        debug!(
-            valid = verify_response.valid,
-            message = ?verify_response.message,
+        info!(
+            is_valid = verify_response.is_valid,
+            payer = ?verify_response.payer,
+            invalid_reason = ?verify_response.invalid_reason,
             "Verify response received"
         );
 
-        Ok(verify_response.valid)
+        if !verify_response.is_valid {
+            anyhow::bail!(
+                "Payment verification failed: {}",
+                verify_response
+                    .invalid_reason
+                    .unwrap_or_else(|| "Unknown reason".to_string())
+            );
+        }
+
+        Ok(verify_response)
     }
 
     /// Settle a payment on the blockchain
     /// This finalizes the payment and transfers funds
-    pub async fn settle(&self, payment: &PaymentPayload) -> Result<SettleResponse> {
+    pub async fn settle(
+        &self,
+        payment: &PaymentPayload,
+        requirements: &FacilitatorPaymentRequirement,
+    ) -> Result<SettleResponse> {
         let url = format!("{}/settle", self.base_url);
 
+        let request_body = FacilitatorRequest {
+            payment_payload: payment.clone(),
+            payment_requirements: requirements.clone(),
+        };
+
         info!(
-            tx_hash = %payment.transaction_hash,
-            network = %payment.network,
-            "Settling payment"
+            url = %url,
+            from = %payment.payload.authorization.from,
+            to = %payment.payload.authorization.to,
+            value = %payment.payload.authorization.value,
+            "Sending settle request to facilitator"
         );
 
         let response = self
             .client
             .post(&url)
-            .json(&json!({
-                "transactionHash": payment.transaction_hash,
-                "network": payment.network,
-            }))
+            .json(&request_body)
             .send()
             .await
-            .context("Failed to send settle request")?;
+            .map_err(|e| {
+                error!(
+                    error = %e,
+                    url = %url,
+                    "HTTP request to facilitator failed"
+                );
+                anyhow::anyhow!("Failed to send settle request: {}", e)
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "Facilitator settle request failed with status {}: {}",
-                status,
-                body
+            error!(
+                status = %status,
+                body = %body,
+                "Facilitator settle request failed"
             );
+            anyhow::bail!("Facilitator returned {}: {}", status, body);
         }
 
         let settle_response: SettleResponse = response
@@ -108,16 +153,14 @@ impl FacilitatorClient {
             .context("Failed to parse settle response")?;
 
         info!(
-            settled = settle_response.settled,
-            tx_hash = %settle_response.transaction_hash,
+            success = settle_response.success,
+            tx_hash = %settle_response.transaction,
+            payer = %settle_response.payer,
             "Payment settled"
         );
 
-        if !settle_response.settled {
-            anyhow::bail!(
-                "Payment settlement failed: {}",
-                settle_response.message.unwrap_or_default()
-            );
+        if !settle_response.success {
+            anyhow::bail!("Payment settlement failed");
         }
 
         Ok(settle_response)
@@ -125,15 +168,16 @@ impl FacilitatorClient {
 
     /// Verify and settle a payment in one call
     /// This is the recommended approach for maximum security
-    pub async fn verify_and_settle(&self, payment: &PaymentPayload) -> Result<SettleResponse> {
+    pub async fn verify_and_settle(
+        &self,
+        payment: &PaymentPayload,
+        requirements: &FacilitatorPaymentRequirement,
+    ) -> Result<SettleResponse> {
         // First verify
-        let valid = self.verify(payment).await?;
-        if !valid {
-            anyhow::bail!("Payment verification failed");
-        }
+        self.verify(payment, requirements).await?;
 
         // Then settle
-        self.settle(payment).await
+        self.settle(payment, requirements).await
     }
 }
 
@@ -143,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_facilitator_client_creation() {
-        let client = FacilitatorClient::new("https://example.com".to_string());
+        let client = FacilitatorClient::new("https://x402.org/facilitator".to_string());
         assert!(client.is_ok());
     }
 }

@@ -1,7 +1,10 @@
 use crate::{
     app::App,
     auth::AuthenticatedKey,
-    x402::{FacilitatorClient, PaymentRequiredResponse, PaymentRequirement, parse_payment_header},
+    x402::{
+        FacilitatorClient, FacilitatorPaymentRequirement, PaymentRequiredResponse,
+        PaymentRequirement, parse_payment_header,
+    },
 };
 use axum::{
     Extension, Json,
@@ -105,9 +108,12 @@ pub async fn handle_x402_create(
                 accepts: vec![PaymentRequirement {
                     scheme: "exact".to_string(),
                     network: x402_config.network.clone(),
-                    amount: x402_config.price_per_link.clone(),
+                    max_amount_required: x402_config.price_per_link.clone(),
                     asset: x402_config.asset_address.clone(),
-                    destination: x402_config.merchant_wallet.clone(),
+                    pay_to: x402_config.merchant_wallet.clone(),
+                    resource: Some("/x402/shorten".to_string()),
+                    description: Some("Link shortening service".to_string()),
+                    max_timeout_seconds: Some(60),
                 }],
             };
 
@@ -117,16 +123,34 @@ pub async fn handle_x402_create(
 
     info!(
         url = %create.url,
-        tx_hash = %payment_payload.transaction_hash,
+        from = %payment_payload.payload.authorization.from,
+        to = %payment_payload.payload.authorization.to,
+        value = %payment_payload.payload.authorization.value,
         network = %payment_payload.network,
         "x402: processing payment"
     );
 
+    // Build payment requirements for facilitator
+    let payment_requirements = FacilitatorPaymentRequirement {
+        scheme: "exact".to_string(),
+        network: x402_config.network.clone(),
+        max_amount_required: x402_config.price_per_link.clone(),
+        pay_to: x402_config.merchant_wallet.clone(),
+        asset: x402_config.asset_address.clone(),
+        resource: Some(format!("{}/x402/shorten", create.url)),
+        description: Some("Link shortening service".to_string()),
+        max_timeout_seconds: Some(60),
+    };
+
     // Verify and settle the payment
-    match facilitator.verify_and_settle(&payment_payload).await {
+    match facilitator
+        .verify_and_settle(&payment_payload, &payment_requirements)
+        .await
+    {
         Ok(settlement) => {
             info!(
-                tx_hash = %settlement.transaction_hash,
+                tx_hash = %settlement.transaction,
+                payer = %settlement.payer,
                 "x402: payment settled successfully"
             );
 
@@ -138,7 +162,7 @@ pub async fn handle_x402_create(
         Err(e) => {
             error!(
                 error = %e,
-                tx_hash = %payment_payload.transaction_hash,
+                from = %payment_payload.payload.authorization.from,
                 "x402: payment settlement failed"
             );
 
@@ -148,9 +172,12 @@ pub async fn handle_x402_create(
                 accepts: vec![PaymentRequirement {
                     scheme: "exact".to_string(),
                     network: x402_config.network.clone(),
-                    amount: x402_config.price_per_link.clone(),
+                    max_amount_required: x402_config.price_per_link.clone(),
                     asset: x402_config.asset_address.clone(),
-                    destination: x402_config.merchant_wallet.clone(),
+                    pay_to: x402_config.merchant_wallet.clone(),
+                    resource: Some("/x402/shorten".to_string()),
+                    description: Some("Link shortening service".to_string()),
+                    max_timeout_seconds: Some(60),
                 }],
             };
 

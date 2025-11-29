@@ -92,7 +92,7 @@ struct Arguments {
     #[arg(long, default_value_t = String::from("1x0000000000000000000000000000000AA"), env = "TURNSTILE_SECRET")]
     turnstile_secret: String,
 
-    #[arg(long, default_value_t = String::from("https://facilitator.x402.dev"), env = "X402_FACILITATOR_URL")]
+    #[arg(long, default_value_t = String::from("https://x402.org/facilitator"), env = "X402_FACILITATOR_URL")]
     x402_facilitator_url: String,
 
     #[arg(long, default_value_t = String::from("base-sepolia"), env = "X402_NETWORK")]
