@@ -11,6 +11,7 @@ async-trait = "0.1"
 axum = { version = "0.8.7", features = ["macros"] }
 axum-turnstile = "0.1"
 base62 = "2.2.3"
+base64 = "0.22"
 chrono = "0.4.42"
 clap = { version = "4.5.52", features = ["derive", "env"] }
 deadpool = "0.12.3"

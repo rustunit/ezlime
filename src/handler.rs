@@ -2,13 +2,14 @@ use crate::{app::App, auth::AuthenticatedKey};
 use axum::{
     Extension, Json,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
 };
 use axum_turnstile::VerifiedTurnstile;
-use ezlime_rs::CreateLinkRequest;
+use ezlime_rs::{CreateLinkRequest, CreatedLinkResponse};
 use std::sync::Arc;
 use tracing::info;
+use x402_rs::{network::Network, types::PaymentPayload};
 
 // Make our own error that wraps `anyhow::Error`.
 pub struct AppError(anyhow::Error);
@@ -72,15 +73,35 @@ pub async fn handle_public_create(
 
 /// x402-powered link shortening endpoint
 /// Payment enforcement is handled by x402-axum middleware
+/// Supports Base mainnet and Base Sepolia USDC payments
 pub async fn handle_x402_create(
     State(app): State<Arc<App>>,
+    headers: HeaderMap,
     Json(create): Json<CreateLinkRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    info!(url = %create.url, "Creating link (x402 payment verified by middleware)");
+    info!(url = %create.url, "x402 payment received, creating link");
 
-    // Payment is already verified by x402-axum middleware
-    // If we reached here, payment was successful
+    // Check if payment was made on Sepolia by inspecting the X-Payment header
+    if let Some(payment_header) = headers.get("x-payment") {
+        if let Ok(payment_str) = payment_header.to_str() {
+            // Decode the base64-encoded payment payload
+            let base64_bytes =
+                x402_rs::types::Base64Bytes(std::borrow::Cow::Borrowed(payment_str.as_bytes()));
+            if let Ok(payment) = PaymentPayload::try_from(base64_bytes) {
+                // Check if the network is BaseSepolia
+                if payment.network == Network::BaseSepolia {
+                    info!("Detected Sepolia testnet payment, returning demo response");
+                    let demo_response = CreatedLinkResponse::new(
+                        "demo123".to_string(),
+                        "https://example.com",
+                        create.url.clone(),
+                    );
+                    return Ok(Json(demo_response).into_response());
+                }
+            }
+        }
+    }
+
     let response = app.create_link("x402".to_string(), create).await?;
-
     Ok(Json(response).into_response())
 }

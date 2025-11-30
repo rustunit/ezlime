@@ -9,5 +9,26 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+  x402-facilitator:
+    image: ukstv/x402-facilitator:latest
+    ports:
+      - "8081:8081"
+    environment:
+      # Server config
+      HOST: "0.0.0.0"
+      PORT: "8081"
+      RUST_LOG: "info"
+
+      # Signer config (using your wallet with gas)
+      SIGNER_TYPE: "private-key"
+      EVM_PRIVATE_KEY: "${EVM_PRIVATE_KEY}"
+
+      # RPC endpoints - Base mainnet
+      RPC_URL_BASE: "https://mainnet.base.org"
+
+      # Optional: Keep testnet for development
+      RPC_URL_BASE_SEPOLIA: "https://sepolia.base.org"
+
 volumes:
   postgres_data:

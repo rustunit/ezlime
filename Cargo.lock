@@ -2689,6 +2689,7 @@ dependencies = [
  "axum",
  "axum-turnstile",
  "base62",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "deadpool",
