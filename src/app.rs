@@ -72,12 +72,23 @@ impl App {
         &self,
         api_key: String,
         payload: CreateLinkRequest,
+        demo_mode: bool,
     ) -> Result<CreatedLinkResponse, anyhow::Error> {
-        let mut hash_offset: u64 = 0;
-
         let url = payload.url.as_str();
 
         validate_url(url)?;
+
+        // If demo mode is enabled, return a demo response without creating a real link
+        if demo_mode {
+            info!("demo request");
+            return Ok(CreatedLinkResponse::new(
+                "rustunit".to_string(),
+                &self.prefix,
+                url.to_string(),
+            ));
+        }
+
+        let mut hash_offset: u64 = 0;
 
         loop {
             let hash = link_hash(url, self.hash_length, hash_offset);
@@ -196,6 +207,7 @@ mod e2e_tests {
                 CreateLinkRequest {
                     url: original_url.clone(),
                 },
+                false,
             )
             .await
             .unwrap();
@@ -210,6 +222,7 @@ mod e2e_tests {
                 CreateLinkRequest {
                     url: original_url.clone(),
                 },
+                false,
             )
             .await
             .unwrap();
@@ -242,6 +255,7 @@ mod e2e_tests {
                 CreateLinkRequest {
                     url: String::from("abcde.com"),
                 },
+                false,
             )
             .await;
 
@@ -346,6 +360,7 @@ mod test_collisions {
                 CreateLinkRequest {
                     url: link1.to_string(),
                 },
+                false,
             )
             .await
             .unwrap();
@@ -355,6 +370,7 @@ mod test_collisions {
                 CreateLinkRequest {
                     url: link2.to_string(),
                 },
+                false,
             )
             .await
             .unwrap();
