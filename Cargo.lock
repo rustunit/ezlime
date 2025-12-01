@@ -2698,6 +2698,7 @@ dependencies = [
  "diesel_migrations",
  "ezlime-rs",
  "futures-util",
+ "hex",
  "mockall",
  "quick_cache",
  "reqwest",

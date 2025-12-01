@@ -79,16 +79,38 @@ pub async fn handle_x402_create(
 ) -> Result<impl IntoResponse, AppError> {
     info!(url = %create.url, "handle_x402_create");
 
-    // Check if payment was made on Sepolia by inspecting the X-Payment header
-    let is_testnet = headers
+    // Extract payment payload from the X-Payment header
+    let payment = headers
         .get("x-payment")
         .and_then(|h| h.to_str().ok())
         .and_then(|s| {
             let base64_bytes = x402_rs::types::Base64Bytes(Cow::Borrowed(s.as_bytes()));
             PaymentPayload::try_from(base64_bytes).ok()
         })
-        .map(|payment| payment.network == Network::BaseSepolia)
-        .unwrap_or(false);
+        .ok_or_else(|| anyhow::anyhow!("Missing or invalid X-Payment header"))?;
+
+    // Extract payment details from EVM payload
+    let (tx_hash, amount) = match &payment.payload {
+        x402_rs::types::ExactPaymentPayload::Evm(evm_payload) => {
+            let hash = format!("0x{}", hex::encode(&evm_payload.signature.0));
+            let amount = evm_payload.authorization.value.0.to_string();
+            (hash, amount)
+        }
+        x402_rs::types::ExactPaymentPayload::Solana(_) => {
+            return Err(anyhow::anyhow!("Solana payments are not supported").into());
+        }
+    };
+
+    // Log payment details
+    info!(
+        network = ?payment.network,
+        tx_hash = %tx_hash,
+        amount = %amount,
+        "x402 payment details"
+    );
+
+    // Check if this is a testnet payment
+    let is_testnet = payment.network == Network::BaseSepolia;
 
     let response = app
         .create_link("x402".to_string(), create, is_testnet)
@@ -181,17 +203,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_x402_create_without_header() {
-        // Create a mock app that expects create_link to be called
-        let mut db = MockLinksDB::new();
-        db.expect_create().times(1).returning(|_| {
-            Ok(crate::models::CreateLink {
-                id: "test123".to_string(),
-                url: "https://example.com/test".to_string(),
-                key: "x402".to_string(),
-            })
-        });
-        db.expect_get().times(0).returning(|_| Ok(None));
-
+        // Create a mock app (won't be used since we expect an error)
+        let db = MockLinksDB::new();
         let app = App::new(
             "http://localhost:8080".to_string(),
             6,
@@ -211,21 +224,7 @@ mod tests {
         // Call the handler
         let result = handle_x402_create(State(app), headers, Json(request)).await;
 
-        assert!(result.is_ok());
-
-        // Extract the response
-        let response = result.unwrap().into_response();
-        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let response_data: CreatedLinkResponse = serde_json::from_slice(&body_bytes).unwrap();
-
-        // Verify it's a real link (not demo)
-        // The actual ID will be a hash of the URL, not "test123"
-        assert_ne!(response_data.id, "rustunit", "Should not be demo response");
-        assert_eq!(
-            response_data.id, "cuwckd",
-            "Should be the computed hash of the URL"
-        );
+        // Should return an error
+        assert!(result.is_err());
     }
 }
