@@ -90,11 +90,15 @@ pub async fn handle_x402_create(
         .ok_or_else(|| anyhow::anyhow!("Missing or invalid X-Payment header"))?;
 
     // Extract payment details from EVM payload
-    let (tx_hash, amount) = match &payment.payload {
+    let (payment_id, amount, from, to) = match &payment.payload {
         x402_rs::types::ExactPaymentPayload::Evm(evm_payload) => {
-            let hash = format!("0x{}", hex::encode(&evm_payload.signature.0));
+            // Use the nonce as a unique payment identifier (not a transaction hash)
+            // The actual transaction hash is only available after the facilitator settles the payment
+            let nonce = format!("0x{}", hex::encode(&evm_payload.authorization.nonce.0));
             let amount = evm_payload.authorization.value.0.to_string();
-            (hash, amount)
+            let from = format!("{:?}", evm_payload.authorization.from);
+            let to = format!("{:?}", evm_payload.authorization.to);
+            (nonce, amount, from, to)
         }
         x402_rs::types::ExactPaymentPayload::Solana(_) => {
             return Err(anyhow::anyhow!("Solana payments are not supported").into());
@@ -104,8 +108,10 @@ pub async fn handle_x402_create(
     // Log payment details
     info!(
         network = ?payment.network,
-        tx_hash = %tx_hash,
+        payment_nonce = %payment_id,
         amount = %amount,
+        from = %from,
+        to = %to,
         "x402 payment details"
     );
 
