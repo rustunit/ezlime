@@ -4,7 +4,9 @@ use crate::{
     counter::{ClickCounter, start_counter_flusher},
     db::PostgresDb,
     db_pool::DbPool,
-    handler::{handle_create, handle_health, handle_public_create, handle_redirect},
+    handler::{
+        handle_create, handle_health, handle_public_create, handle_redirect, handle_x402_create,
+    },
     migrations::run_migrations,
 };
 use axum::{
@@ -17,6 +19,9 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use x402_axum::{PriceTag, X402Middleware};
+use x402_rs::network::{Network, USDCDeployment};
+use x402_rs::types::EvmAddress;
 
 mod app;
 mod auth;
@@ -86,6 +91,15 @@ struct Arguments {
 
     #[arg(long, default_value_t = String::from("1x0000000000000000000000000000000AA"), env = "TURNSTILE_SECRET")]
     turnstile_secret: String,
+
+    #[arg(long, default_value_t = String::from("http://localhost:8081"), env = "X402_FACILITATOR_URL")]
+    x402_facilitator_url: String,
+
+    #[arg(long, default_value_t = String::from("0.01"), env = "X402_PRICE_PER_LINK")]
+    x402_price_per_link: String,
+
+    #[arg(long, env = "X402_MERCHANT_WALLET")]
+    x402_merchant_wallet: Option<String>,
 }
 
 fn setup_cors(relaxed: bool) -> CorsLayer {
@@ -141,6 +155,58 @@ async fn main() -> anyhow::Result<()> {
         .route("/shorten", post(handle_public_create))
         .layer(TurnstileLayer::from_secret(args.turnstile_secret));
 
+    // x402 payment endpoint (optional - only if merchant wallet is configured)
+    let x402_router = if let Some(merchant_wallet) = args.x402_merchant_wallet {
+        tracing::info!(
+            facilitator = %args.x402_facilitator_url,
+            price = %args.x402_price_per_link,
+            merchant = %merchant_wallet,
+            "x402 payment endpoint enabled"
+        );
+
+        let x402 = X402Middleware::try_from(args.x402_facilitator_url.as_str())
+            .expect("Failed to create x402 middleware");
+
+        // Parse merchant wallet address
+        let merchant_address: EvmAddress = merchant_wallet
+            .parse()
+            .expect("Invalid merchant wallet address");
+
+        // Parse price as float, then convert to token units (USDC has 6 decimals)
+        let price_usdc: f64 = args
+            .x402_price_per_link
+            .parse()
+            .expect("Invalid price format");
+
+        // Convert to base units (multiply by 10^6 for USDC)
+        let price_base_units = (price_usdc * 1_000_000.0) as u64;
+
+        // Create price tags for both Base mainnet and Base Sepolia
+        let usdc_base = USDCDeployment::by_network(Network::Base);
+        let price_tag_base = PriceTag::new(merchant_address, price_base_units, usdc_base);
+
+        let usdc_sepolia = USDCDeployment::by_network(Network::BaseSepolia);
+        let price_tag_sepolia = PriceTag::new(merchant_address, price_base_units, usdc_sepolia);
+
+        tracing::info!(
+            merchant = ?merchant_address,
+            amount = price_base_units,
+            networks = "base-mainnet, base-sepolia",
+            "x402 price tags configured"
+        );
+
+        Router::new()
+            .route("/x402/shorten", post(handle_x402_create))
+            .layer(
+                x402.with_description("Link shortening service")
+                    .with_price_tag(price_tag_base) // Base mainnet (first one)
+                    .or_price_tag(price_tag_sepolia), // Base Sepolia testnet (add to list)
+            )
+    } else {
+        tracing::info!("x402 payment endpoint disabled (no merchant wallet configured)");
+        Router::new()
+    };
+
     let router = Router::new()
         //authenticated routes
         .route("/link/create", post(handle_create))
@@ -148,6 +214,7 @@ async fn main() -> anyhow::Result<()> {
         //public routes
         .route("/{id}", get(handle_redirect))
         .merge(pub_api)
+        .merge(x402_router)
         .route("/health", get(handle_health))
         .layer(TraceLayer::new_for_http())
         .layer(setup_cors(cors_relaxed))
