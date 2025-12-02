@@ -21,7 +21,6 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use x402_axum::{PriceTag, X402Middleware};
 use x402_rs::network::{Network, USDCDeployment};
-use x402_rs::types::EvmAddress;
 
 mod app;
 mod auth;
@@ -168,7 +167,7 @@ async fn main() -> anyhow::Result<()> {
             .expect("Failed to create x402 middleware");
 
         // Parse merchant wallet address
-        let merchant_address: EvmAddress = merchant_wallet
+        let merchant_address: x402_rs::types::EvmAddress = merchant_wallet
             .parse()
             .expect("Invalid merchant wallet address");
 
@@ -199,6 +198,7 @@ async fn main() -> anyhow::Result<()> {
             .route("/x402/shorten", post(handle_x402_create))
             .layer(
                 x402.with_description("Link shortening service")
+                    .settle_before_execution()
                     .with_price_tag(price_tag_base) // Base mainnet (first one)
                     .or_price_tag(price_tag_sepolia), // Base Sepolia testnet (add to list)
             )

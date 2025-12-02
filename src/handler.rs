@@ -9,7 +9,10 @@ use axum_turnstile::VerifiedTurnstile;
 use ezlime_rs::CreateLinkRequest;
 use std::{borrow::Cow, sync::Arc};
 use tracing::info;
-use x402_rs::{network::Network, types::PaymentPayload};
+use x402_rs::{
+    network::Network,
+    types::{PaymentPayload, SettleResponse},
+};
 
 // Make our own error that wraps `anyhow::Error`.
 #[derive(Debug)]
@@ -73,13 +76,14 @@ pub async fn handle_public_create(
 }
 
 pub async fn handle_x402_create(
+    Extension(settlement): Extension<Option<SettleResponse>>,
     State(app): State<Arc<App>>,
     headers: HeaderMap,
     Json(create): Json<CreateLinkRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     info!(url = %create.url, "handle_x402_create");
 
-    // Extract payment payload from the X-Payment header
+    // Extract payment details from the X-Payment header
     let payment = headers
         .get("x-payment")
         .and_then(|h| h.to_str().ok())
@@ -89,33 +93,33 @@ pub async fn handle_x402_create(
         })
         .ok_or_else(|| anyhow::anyhow!("Missing or invalid X-Payment header"))?;
 
-    // Extract payment details from EVM payload
-    let (payment_id, amount, from, to) = match &payment.payload {
+    // Extract payment amount and addresses from EVM payload
+    let (amount, from, to) = match &payment.payload {
         x402_rs::types::ExactPaymentPayload::Evm(evm_payload) => {
-            // Use the nonce as a unique payment identifier (not a transaction hash)
-            // The actual transaction hash is only available after the facilitator settles the payment
-            let nonce = format!("0x{}", hex::encode(&evm_payload.authorization.nonce.0));
             let amount = evm_payload.authorization.value.0.to_string();
             let from = format!("{:?}", evm_payload.authorization.from);
             let to = format!("{:?}", evm_payload.authorization.to);
-            (nonce, amount, from, to)
+            (amount, from, to)
         }
         x402_rs::types::ExactPaymentPayload::Solana(_) => {
             return Err(anyhow::anyhow!("Solana payments are not supported").into());
         }
     };
 
-    // Log payment details
+    // Extract transaction hash from the settlement extension
+    let tx_hash = settlement
+        .and_then(|s| s.transaction)
+        .map(|tx| tx.to_string());
+
     info!(
         network = ?payment.network,
-        payment_nonce = %payment_id,
         amount = %amount,
         from = %from,
         to = %to,
+        tx_hash = ?tx_hash,
         "x402 payment details"
     );
 
-    // Check if this is a testnet payment
     let is_testnet = payment.network == Network::BaseSepolia;
 
     let response = app
@@ -187,7 +191,7 @@ mod tests {
         };
 
         // Call the handler
-        let result = handle_x402_create(State(app), headers, Json(request)).await;
+        let result = handle_x402_create(Extension(None), State(app), headers, Json(request)).await;
 
         assert!(result.is_ok());
 
@@ -208,9 +212,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_x402_create_without_header() {
-        // Create a mock app (won't be used since we expect an error)
+    async fn test_handle_x402_create_without_payment_header() {
+        // Create a mock app
         let db = MockLinksDB::new();
+
         let app = App::new(
             "http://localhost:8080".to_string(),
             6,
@@ -227,10 +232,9 @@ mod tests {
             url: "https://example.com/test".to_string(),
         };
 
-        // Call the handler
-        let result = handle_x402_create(State(app), headers, Json(request)).await;
+        // Call the handler - should fail without X-Payment header
+        let result = handle_x402_create(Extension(None), State(app), headers, Json(request)).await;
 
-        // Should return an error
         assert!(result.is_err());
     }
 }

@@ -10076,8 +10076,7 @@ dependencies = [
 [[package]]
 name = "x402-axum"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed6dc5e0ffa1a47c6a013da7c94cfbe82f1f71182130bca3305f57c66140ecf9"
+source = "git+https://github.com/extrawurst/x402-rs.git?branch=add-extension-for-settleresponse#16c428691e2cd566943b889ce1cd07739805df42"
 dependencies = [
  "axum-core",
  "http 1.4.0",
@@ -10093,9 +10092,8 @@ dependencies = [
 
 [[package]]
 name = "x402-rs"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5da32ef9625883be2175f8bc194fcf3e84712dc2f54e8de78fd015a02b02ed3d"
+version = "0.10.0"
+source = "git+https://github.com/extrawurst/x402-rs.git?branch=add-extension-for-settleresponse#16c428691e2cd566943b889ce1cd07739805df42"
 dependencies = [
  "alloy",
  "async-trait",

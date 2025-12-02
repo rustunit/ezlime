@@ -36,9 +36,13 @@ tower-http = { version = "0.6.6", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 x402-axum = "0.6"
-x402-rs = "0.9.3"
+x402-rs = "0.10"
 
 [dev-dependencies]
 mockall = "0.13.1"
 testcontainers = "0.25"
 testcontainers-modules = { version = "0.13", features = ["postgres"] }
+
+[patch.crates-io]
+x402-axum = { git="https://github.com/extrawurst/x402-rs.git", branch="add-extension-for-settleresponse" }
+x402-rs = { git="https://github.com/extrawurst/x402-rs.git", branch="add-extension-for-settleresponse" }
