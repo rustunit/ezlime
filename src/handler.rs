@@ -97,8 +97,8 @@ pub async fn handle_x402_create(
     let (amount, from, to) = match &payment.payload {
         x402_rs::types::ExactPaymentPayload::Evm(evm_payload) => {
             let amount = evm_payload.authorization.value.0.to_string();
-            let from = format!("{:?}", evm_payload.authorization.from);
-            let to = format!("{:?}", evm_payload.authorization.to);
+            let from = evm_payload.authorization.from.to_string();
+            let to = evm_payload.authorization.to.to_string();
             (amount, from, to)
         }
         x402_rs::types::ExactPaymentPayload::Solana(_) => {
@@ -106,17 +106,18 @@ pub async fn handle_x402_create(
         }
     };
 
-    // Extract transaction hash from the settlement extension
+    // Extract transaction hash from the settlement extension (error if missing)
     let tx_hash = settlement
         .and_then(|s| s.transaction)
-        .map(|tx| tx.to_string());
+        .map(|tx| tx.to_string())
+        .ok_or_else(|| anyhow::anyhow!("No transaction hash in settlement"))?;
 
     info!(
         network = ?payment.network,
         amount = %amount,
         from = %from,
         to = %to,
-        tx_hash = ?tx_hash,
+        tx_hash = %tx_hash,
         "x402 payment details"
     );
 
@@ -190,8 +191,27 @@ mod tests {
             url: test_url.clone(),
         };
 
+        // Create a mock settlement response with a transaction hash
+        let mock_settlement = SettleResponse {
+            success: true,
+            error_reason: None,
+            payer: x402_rs::types::MixedAddress::from(
+                "0x0000000000000000000000000000000000000000"
+                    .parse::<x402_rs::types::EvmAddress>()
+                    .unwrap(),
+            ),
+            transaction: Some(x402_rs::types::TransactionHash::Evm([0x12; 32])),
+            network: Network::BaseSepolia,
+        };
+
         // Call the handler
-        let result = handle_x402_create(Extension(None), State(app), headers, Json(request)).await;
+        let result = handle_x402_create(
+            Extension(Some(mock_settlement)),
+            State(app),
+            headers,
+            Json(request),
+        )
+        .await;
 
         assert!(result.is_ok());
 
