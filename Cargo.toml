@@ -44,5 +44,5 @@ testcontainers = "0.25"
 testcontainers-modules = { version = "0.13", features = ["postgres"] }
 
 [patch.crates-io]
-x402-axum = { git="https://github.com/extrawurst/x402-rs.git", branch="add-extension-for-settleresponse" }
-x402-rs = { git="https://github.com/extrawurst/x402-rs.git", branch="add-extension-for-settleresponse" }
+x402-axum = { git = "https://github.com/extrawurst/x402-rs.git", branch = "add-extension-for-settleresponse" }
+x402-rs = { git = "https://github.com/extrawurst/x402-rs.git", branch = "add-extension-for-settleresponse" }
