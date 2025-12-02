@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["extrawurst <mail@rusticorn.com>"]
 license = "MIT OR Apache-2.0"
+build = "build.rs"
 
 [dependencies]
 anyhow = "1.0"
@@ -42,6 +43,10 @@ x402-rs = "0.10"
 mockall = "0.13.1"
 testcontainers = "0.25"
 testcontainers-modules = { version = "0.13", features = ["postgres"] }
+
+[build-dependencies]
+anyhow = "1"
+vergen-gitcl = "1.0"
 
 [patch.crates-io]
 x402-axum = { git = "https://github.com/extrawurst/x402-rs.git", branch = "add-extension-for-settleresponse" }

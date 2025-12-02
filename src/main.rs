@@ -33,6 +33,8 @@ mod models;
 mod schema;
 mod signals;
 
+pub const GIT_HASH: &str = env!("VERGEN_GIT_SHA");
+
 #[cfg(not(debug_assertions))]
 #[must_use]
 pub const fn is_debug() -> bool {
@@ -127,6 +129,8 @@ async fn main() -> anyhow::Result<()> {
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .expect("Could not install rustls default crypto provider.");
+
+    tracing::info!(git = %GIT_HASH, log = log_level, cors_relaxed, cache_size = args.cache_size, "server starting");
 
     run_migrations(&args.db_url)?;
 
