@@ -1,7 +1,7 @@
 use crate::{
     counter::ClickCounter,
     db::{DbError, LinksDB},
-    models::CreateLink,
+    models::{CreateLink, CreateTransaction},
 };
 use ezlime_rs::{CreateLinkRequest, CreatedLinkResponse};
 use quick_cache::sync::Cache;
@@ -65,6 +65,24 @@ impl App {
             cache: Arc::new(Cache::new(cache_size)),
             click_counter,
         })
+    }
+
+    #[instrument(skip(self), err)]
+    pub async fn store_transaction(
+        &self,
+        link_id: String,
+        tx_hash: String,
+        network: String,
+    ) -> Result<(), anyhow::Error> {
+        let tx = CreateTransaction {
+            link_id,
+            tx_hash,
+            network,
+        };
+
+        self.db.create_transaction(&tx).await?;
+
+        Ok(())
     }
 
     #[instrument(skip(self), err)]
@@ -316,6 +334,10 @@ mod test_collisions {
 
     #[async_trait]
     impl LinksDB for MemDb {
+        async fn create_transaction(&self, _tx: &CreateTransaction) -> Result<(), DbError> {
+            panic!("should not be used in this test");
+        }
+
         async fn create(&self, link: &CreateLink) -> Result<CreateLink, DbError> {
             let mut db = self.data.lock().await;
 

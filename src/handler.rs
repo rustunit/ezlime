@@ -127,6 +127,9 @@ pub async fn handle_x402_create(
         .create_link("x402".to_string(), create, is_testnet)
         .await?;
 
+    app.store_transaction(response.id.clone(), tx_hash, payment.network.to_string())
+        .await?;
+
     Ok(Json(response).into_response())
 }
 
@@ -141,7 +144,9 @@ mod tests {
     #[tokio::test]
     async fn test_handle_x402_create_sepolia_returns_demo() {
         // Create a mock app
-        let db = MockLinksDB::new();
+        let mut db = MockLinksDB::new();
+        db.expect_create_transaction().returning(|_| Ok(()));
+
         let app = App::new(
             "http://localhost:8080".to_string(),
             6,

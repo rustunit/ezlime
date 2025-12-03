@@ -1,4 +1,4 @@
-use crate::models::{CreateLink, FetchLink};
+use crate::models::{CreateLink, CreateTransaction, FetchLink};
 use async_trait::async_trait;
 use diesel::result::DatabaseErrorKind;
 use thiserror::Error;
@@ -35,6 +35,7 @@ impl From<deadpool::managed::PoolError<diesel_async::pooled_connection::PoolErro
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait LinksDB: Send + Sync {
+    async fn create_transaction(&self, tx: &CreateTransaction) -> Result<(), DbError>;
     async fn create(&self, link: &CreateLink) -> Result<CreateLink, DbError>;
     async fn get(&self, id: &str) -> Result<Option<FetchLink>, DbError>;
 }
