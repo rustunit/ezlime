@@ -6,6 +6,9 @@ authors = ["extrawurst <mail@rusticorn.com>"]
 license = "MIT OR Apache-2.0"
 build = "build.rs"
 
+[profile.release]
+debug = true  # Include debug info in release builds
+
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
