@@ -6,13 +6,11 @@ authors = ["extrawurst <mail@rusticorn.com>"]
 license = "MIT OR Apache-2.0"
 build = "build.rs"
 
-[profile.release]
-debug = true  # Include debug info in release builds
-
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
 axum = { version = "0.8.7", features = ["macros"] }
+axum-prometheus = "0.9.0"
 axum-turnstile = "0.1"
 base62 = "2.2.3"
 base64 = "0.22"
@@ -50,6 +48,9 @@ vergen-gitcl = "1.0"
 mockall = "0.13.1"
 testcontainers = "0.25"
 testcontainers-modules = { version = "0.13", features = ["postgres"] }
+
+[profile.release]
+debug = true  # Include debug info in release builds
 
 [patch.crates-io]
 x402-axum = { git = "https://github.com/extrawurst/x402-rs.git", branch = "add-extension-for-settleresponse" }

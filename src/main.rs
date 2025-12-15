@@ -211,6 +211,8 @@ async fn main() -> anyhow::Result<()> {
         Router::new()
     };
 
+    let (prometheus_layer, metrics_handler) = axum_prometheus::PrometheusMetricLayer::pair();
+
     let router = Router::new()
         //authenticated routes
         .route("/link/create", post(handle_create))
@@ -220,8 +222,10 @@ async fn main() -> anyhow::Result<()> {
         .merge(pub_api)
         .merge(x402_router)
         .route("/health", get(handle_health))
+        .route("/metrics", get(async move || metrics_handler.render()))
         .layer(TraceLayer::new_for_http())
         .layer(setup_cors(cors_relaxed))
+        .layer(prometheus_layer)
         .with_state(Arc::clone(&app));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
