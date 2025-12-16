@@ -157,6 +157,11 @@ impl App {
     }
 
     pub async fn redirect(&self, id: &str) -> Result<String, anyhow::Error> {
+        if id.contains(".") || id.is_empty() {
+            warn!(id, "validation failed");
+            anyhow::bail!("invalid id");
+        }
+
         if let Some(link) = self.cache.get(id) {
             self.click_counter.increment(id).await;
             info!(id, "redirect from cache");
