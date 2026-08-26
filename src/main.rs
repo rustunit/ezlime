@@ -22,6 +22,30 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use x402_axum::{PriceTag, X402Middleware};
 use x402_rs::network::{Network, USDCDeployment};
 
+/// The `endpoint` label given to a request that matched no route.
+///
+/// The metrics registry never drops a series, so labelling 404s with the path
+/// they asked for lets anyone mint unbounded cardinality by guessing URLs — a
+/// routine credential scanner adds a thousand in a minute, and every scrape
+/// pays to serialise them from then on.
+const UNMATCHED_ENDPOINT: &str = "unmatched";
+
+/// The metrics layer and the handle `/metrics` renders from.
+///
+/// A function rather than an inline `pair()` because the test that checks what
+/// this labels has to build the same thing the server runs.
+fn metrics_pair() -> (
+    axum_prometheus::PrometheusMetricLayer<'static>,
+    axum_prometheus::metrics_exporter_prometheus::PrometheusHandle,
+) {
+    axum_prometheus::PrometheusMetricLayerBuilder::new()
+        .with_endpoint_label_type(axum_prometheus::EndpointLabel::MatchedPathWithFallbackFn(
+            |_| UNMATCHED_ENDPOINT.to_owned(),
+        ))
+        .with_default_metrics()
+        .build_pair()
+}
+
 mod app;
 mod auth;
 mod counter;
@@ -211,7 +235,7 @@ async fn main() -> anyhow::Result<()> {
         Router::new()
     };
 
-    let (prometheus_layer, metrics_handler) = axum_prometheus::PrometheusMetricLayer::pair();
+    let (prometheus_layer, metrics_handler) = metrics_pair();
 
     let router = Router::new()
         //authenticated routes
@@ -253,4 +277,69 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod metrics_test {
+    use super::{UNMATCHED_ENDPOINT, metrics_pair};
+    use axum::{Router, body::Body, http::Request, routing::get};
+    use tower::ServiceExt;
+
+    /// A path that matched no route must not reach the `endpoint` label.
+    ///
+    /// The registry never drops a series, so the alternative is any stranger
+    /// minting unbounded cardinality by guessing URLs — which is what a
+    /// credential scanner does by the thousand, and what every later scrape
+    /// then pays to serialise. `/{id}` swallows the single-segment guesses;
+    /// what got through here were the deeper ones.
+    #[tokio::test]
+    async fn unmatched_paths_share_one_label() {
+        let (layer, handle) = metrics_pair();
+
+        let app = Router::new()
+            .route("/health", get(|| async { "ok" }))
+            .route("/{id}", get(|| async { "ok" }))
+            .layer(layer);
+
+        for path in [
+            "/health",
+            "/abc123",
+            "/wordpress/wp-includes/wlwmanifest.xml",
+            "/app/config/mailgun/settings.php",
+        ] {
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("request should be well formed"),
+                )
+                .await
+                .expect("router is infallible");
+        }
+
+        let rendered = handle.render();
+
+        for probed in ["wlwmanifest", "mailgun"] {
+            assert!(
+                !rendered.contains(probed),
+                "a probed path reached a label:\n{rendered}",
+            );
+        }
+        assert!(
+            rendered.contains(&format!("endpoint=\"{UNMATCHED_ENDPOINT}\"")),
+            "unmatched requests were not folded together:\n{rendered}",
+        );
+
+        // The routes that do exist keep reporting themselves, and the id is a
+        // pattern rather than whatever was asked for.
+        assert!(
+            rendered.contains("endpoint=\"/health\""),
+            "a real route lost its label:\n{rendered}",
+        );
+        assert!(
+            rendered.contains("endpoint=\"/{id}\"") && !rendered.contains("abc123"),
+            "a path parameter leaked into a label:\n{rendered}",
+        );
+    }
 }
