@@ -19,8 +19,9 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use x402_axum::{PriceTag, X402Middleware};
-use x402_rs::network::{Network, USDCDeployment};
+use x402_axum::{X402Middleware}; 
+use x402_types::networks::USDC;
+use x402_chain_eip155::{V1Eip155Exact, KnownNetworkEip155, chain::ChecksummedAddress};
 
 /// The `endpoint` label given to a request that matched no route.
 ///
@@ -195,7 +196,7 @@ async fn main() -> anyhow::Result<()> {
             .expect("Failed to create x402 middleware");
 
         // Parse merchant wallet address
-        let merchant_address: x402_rs::types::EvmAddress = merchant_wallet
+        let merchant_address: ChecksummedAddress = merchant_wallet
             .parse()
             .expect("Invalid merchant wallet address");
 
@@ -209,11 +210,17 @@ async fn main() -> anyhow::Result<()> {
         let price_base_units = (price_usdc * 1_000_000.0) as u64;
 
         // Create price tags for both Base mainnet and Base Sepolia
-        let usdc_base = USDCDeployment::by_network(Network::Base);
-        let price_tag_base = PriceTag::new(merchant_address, price_base_units, usdc_base);
+        let usdc_base = USDC::base();
+        let price_tag_base = V1Eip155Exact::price_tag(
+            merchant_address,
+            usdc_base.amount(price_base_units)
+        );
 
-        let usdc_sepolia = USDCDeployment::by_network(Network::BaseSepolia);
-        let price_tag_sepolia = PriceTag::new(merchant_address, price_base_units, usdc_sepolia);
+        let usdc_sepolia = USDC::base_sepolia();
+        let price_tag_sepolia = V1Eip155Exact::price_tag(
+            merchant_address,
+            usdc_sepolia.amount(price_base_units)
+        );
 
         tracing::info!(
             merchant = ?merchant_address,
@@ -223,12 +230,14 @@ async fn main() -> anyhow::Result<()> {
         );
 
         Router::new()
-            .route("/x402/shorten", post(handle_x402_create))
-            .layer(
-                x402.with_description("Link shortening service")
-                    .settle_before_execution()
-                    .with_price_tag(price_tag_base) // Base mainnet (first one)
-                    .or_price_tag(price_tag_sepolia), // Base Sepolia testnet (add to list)
+            .route(
+                "/x402/shorten",
+                post(handle_x402_create).layer(
+                    x402.settle_before_execution()
+                        .with_price_tag(price_tag_base) // Base mainnet (first one)
+                        .with_price_tag(price_tag_sepolia) // Base Sepolia testnet (add to list)
+                        .with_description("Link shortening service".to_string())
+                ),
             )
     } else {
         tracing::info!("x402 payment endpoint disabled (no merchant wallet configured)");

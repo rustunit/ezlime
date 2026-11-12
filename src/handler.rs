@@ -7,12 +7,13 @@ use axum::{
 };
 use axum_turnstile::VerifiedTurnstile;
 use ezlime_rs::CreateLinkRequest;
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 use tracing::info;
-use x402_rs::{
-    network::Network,
-    types::{PaymentPayload, SettleResponse},
+use x402_types::{
+    proto::v1::{PaymentPayload, SettleResponse},
+    util::b64::Base64Bytes,
 };
+use x402_chain_eip155::{v1_eip155_exact::types::ExactEvmPayload};
 
 // Make our own error that wraps `anyhow::Error`.
 #[derive(Debug)]
@@ -84,33 +85,50 @@ pub async fn handle_x402_create(
     info!(url = %create.url, "handle_x402_create");
 
     // Extract payment details from the X-Payment header
-    let payment = headers
+    let payment: PaymentPayload = headers
         .get("x-payment")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| {
-            let base64_bytes = x402_rs::types::Base64Bytes(Cow::Borrowed(s.as_bytes()));
-            PaymentPayload::try_from(base64_bytes).ok()
-        })
-        .ok_or_else(|| anyhow::anyhow!("Missing or invalid X-Payment header"))?;
+        .ok_or_else(|| anyhow::anyhow!("Missing X-Payment header"))
+        .and_then(|header| {
+            let decoded = Base64Bytes::from(header.as_bytes())
+                .decode()
+                .map_err(|_| anyhow::anyhow!("Invalid X-Payment header"))?;
 
-    // Extract payment amount and addresses from EVM payload
-    let (amount, from, to) = match &payment.payload {
-        x402_rs::types::ExactPaymentPayload::Evm(evm_payload) => {
-            let amount = evm_payload.authorization.value.0.to_string();
-            let from = evm_payload.authorization.from.to_string();
-            let to = evm_payload.authorization.to.to_string();
-            (amount, from, to)
-        }
-        x402_rs::types::ExactPaymentPayload::Solana(_) => {
+            serde_json::from_slice(decoded.as_ref())
+                .map_err(|_| anyhow::anyhow!("Invalid X-Payment header"))
+        })?;
+
+    let network_namespace = payment.network.split(":").next().expect("network name expected");
+
+    let (amount, from, to) = match network_namespace {
+        "eip155" | "base" | "base-sepolia" | "polygon" => {
+            let evm_payload: ExactEvmPayload = 
+            serde_json::from_str(payment.payload.get())
+                .map_err(|_| anyhow::anyhow!("Invalid EVM payload"))?;
+            (
+                evm_payload.authorization.value.to_string(),
+                evm_payload.authorization.from.to_string(),
+                evm_payload.authorization.to.to_string(),
+            )
+        },
+        "solana" => {
             return Err(anyhow::anyhow!("Solana payments are not supported").into());
+        }
+        _ => {
+            return Err(anyhow::anyhow!("Unsupported network").into());
         }
     };
 
     // Extract transaction hash from the settlement extension (error if missing)
     let tx_hash = settlement
-        .and_then(|s| s.transaction)
-        .map(|tx| tx.to_string())
-        .ok_or_else(|| anyhow::anyhow!("No transaction hash in settlement"))?;
+        .ok_or(anyhow::anyhow!("No transaction hash in settlement"))
+        .and_then(|s| 
+            if let SettleResponse::Success { transaction: t, payer: _, network: _ } = s {
+                Ok(t)
+            } else {
+                Err(anyhow::anyhow!("No transaction hash in settlement"))
+            }
+        )?;
+
 
     info!(
         network = ?payment.network,
@@ -121,7 +139,7 @@ pub async fn handle_x402_create(
         "x402 payment details"
     );
 
-    let is_testnet = payment.network == Network::BaseSepolia;
+    let is_testnet = payment.network == "base-sepolia";
 
     let response = app
         .create_link("x402".to_string(), create, is_testnet)
