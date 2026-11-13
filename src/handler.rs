@@ -124,15 +124,10 @@ pub async fn handle_x402_create(
     };
 
     // Extract transaction hash from the settlement extension (error if missing)
-    let tx_hash = settlement
-        .ok_or(anyhow::anyhow!("No transaction hash in settlement"))
-        .and_then(|s| 
-            if let SettleResponse::Success { transaction: t, payer: _, network: _ } = s {
-                Ok(t)
-            } else {
-                Err(anyhow::anyhow!("No transaction hash in settlement"))
-            }
-        )?;
+    let tx_hash = match settlement {
+        Some(SettleResponse::Success { transaction, .. }) => Ok(transaction),
+        _ => Err(anyhow::anyhow!("No transaction hash in settlement")),
+    }?;
 
     info!(
         network = ?payment.network,
