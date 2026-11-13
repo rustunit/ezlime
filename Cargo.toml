@@ -37,6 +37,7 @@ tower = "0.5.2"
 tower-http = { version = "0.6.6", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+tracing-test = "0.2.6"
 x402-axum = "2.0.2"
 x402-chain-eip155 = { version = "2.0.2", features = ["server"] }
 x402-types = { version = "2.0.2" }

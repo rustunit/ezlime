@@ -12,8 +12,10 @@ use tracing::info;
 use x402_types::{
     proto::v1::{PaymentPayload, SettleResponse},
     util::b64::Base64Bytes,
+    chain::ChainId,
+    networks::chain_id_by_network_name, 
 };
-use x402_chain_eip155::{v1_eip155_exact::types::ExactEvmPayload};
+use x402_chain_eip155::{v1_eip155_exact::ExactEvmPayload};
 
 // Make our own error that wraps `anyhow::Error`.
 #[derive(Debug)]
@@ -97,10 +99,13 @@ pub async fn handle_x402_create(
                 .map_err(|_| anyhow::anyhow!("Invalid X-Payment header"))
         })?;
 
-    let network_namespace = payment.network.split(":").next().expect("network name expected");
 
-    let (amount, from, to) = match network_namespace {
-        "eip155" | "base" | "base-sepolia" | "polygon" => {
+
+    let chain_id: ChainId = payment.network.parse()
+                .map_err(|_| anyhow::anyhow!("Invalid network"))?;
+
+    let (amount, from, to) = match chain_id.namespace.as_str() {
+        "eip155" => {
             let evm_payload: ExactEvmPayload = 
             serde_json::from_str(payment.payload.get())
                 .map_err(|_| anyhow::anyhow!("Invalid EVM payload"))?;
@@ -132,6 +137,7 @@ pub async fn handle_x402_create(
 
     info!(
         network = ?payment.network,
+        chain_id = ?chain_id,
         amount = %amount,
         from = %from,
         to = %to,
@@ -139,7 +145,7 @@ pub async fn handle_x402_create(
         "x402 payment details"
     );
 
-    let is_testnet = payment.network == "base-sepolia";
+    let is_testnet = &chain_id == chain_id_by_network_name("base-sepolia").unwrap();
 
     let response = app
         .create_link("x402".to_string(), create, is_testnet)
@@ -157,8 +163,11 @@ mod tests {
     use crate::{counter::ClickCounter, db::MockLinksDB};
     use axum::http::HeaderValue;
     use ezlime_rs::CreatedLinkResponse;
-    use x402_rs::types::{ExactEvmPayload, ExactEvmPayloadAuthorization, ExactPaymentPayload};
+    use x402_chain_eip155::v1_eip155_exact::ExactEvmPayloadAuthorization;
+    use x402_types::timestamp::UnixTimestamp;
+    use tracing_test::traced_test;
 
+    #[traced_test]
     #[tokio::test]
     async fn test_handle_x402_create_sepolia_returns_demo() {
         // Create a mock app
@@ -173,28 +182,23 @@ mod tests {
             10,
         );
 
+        let chain_id = ChainId::from_network_name("base-sepolia").unwrap();
         // Create a PaymentPayload for BaseSepolia
         let payment = PaymentPayload {
-            x402_version: x402_rs::types::X402Version::V1,
-            scheme: x402_rs::types::Scheme::Exact,
-            network: Network::BaseSepolia,
-            payload: ExactPaymentPayload::Evm(ExactEvmPayload {
-                signature: x402_rs::types::EvmSignature(vec![0u8; 65]),
+            x402_version: x402_types::proto::v1::X402Version1,
+            scheme: "exact".to_string(),
+            network: chain_id.to_string(),
+            payload: ExactEvmPayload {
+                signature: vec![0u8; 65].into(),
                 authorization: ExactEvmPayloadAuthorization {
-                    from: "0x0000000000000000000000000000000000000000"
-                        .parse()
-                        .unwrap(),
-                    to: "0x0000000000000000000000000000000000000000"
-                        .parse()
-                        .unwrap(),
-                    value: x402_rs::types::TokenAmount(
-                        x402_rs::__reexports::alloy::primitives::U256::from(1000000),
-                    ),
-                    valid_after: x402_rs::timestamp::UnixTimestamp(0),
-                    valid_before: x402_rs::timestamp::UnixTimestamp(u64::MAX),
-                    nonce: x402_rs::types::HexEncodedNonce([0u8; 32]),
+                    from: "0x0000000000000000000000000000000000000000".parse().unwrap(),
+                    to: "0x0000000000000000000000000000000000000000".parse().unwrap(),
+                    value: "1000000".parse().unwrap(),
+                    valid_after: UnixTimestamp::from_secs(0),
+                    valid_before: UnixTimestamp::from_secs(u64::MAX),
+                    nonce: [0u8; 32].into(),
                 },
-            }),
+            },
         };
 
         // Encode the payment as base64 JSON
@@ -215,16 +219,10 @@ mod tests {
         };
 
         // Create a mock settlement response with a transaction hash
-        let mock_settlement = SettleResponse {
-            success: true,
-            error_reason: None,
-            payer: x402_rs::types::MixedAddress::from(
-                "0x0000000000000000000000000000000000000000"
-                    .parse::<x402_rs::types::EvmAddress>()
-                    .unwrap(),
-            ),
-            transaction: Some(x402_rs::types::TransactionHash::Evm([0x12; 32])),
-            network: Network::BaseSepolia,
+        let mock_settlement = SettleResponse::Success {
+            payer: "0x0000000000000000000000000000000000000000".to_string(),
+            transaction: "0xdeadbeefcafe".to_string(),
+            network: chain_id.to_string(),
         };
 
         // Call the handler
