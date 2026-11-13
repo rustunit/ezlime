@@ -134,7 +134,6 @@ pub async fn handle_x402_create(
             }
         )?;
 
-
     info!(
         network = ?payment.network,
         chain_id = ?chain_id,
